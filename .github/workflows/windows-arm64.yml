@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Report native toolchain
         shell: pwsh
@@ -169,7 +171,8 @@ jobs:
           $qt = Join-Path $env:QT_ROOT "$env:QT_VERSION\msvc2022_arm64"
           New-Item -ItemType Directory -Force -Path $env:DEPLOY_DIR | Out-Null
           Copy-Item "$env:BUILD_DIR\Release\*" -Destination $env:DEPLOY_DIR -Recurse
-          Copy-Item LICENSE -Destination $env:DEPLOY_DIR
+          Get-ChildItem $env:DEPLOY_DIR -Recurse -File -Include *.lib,*.exp,*.pdb,*.ilk |
+            Remove-Item -Force
           & "$qt\bin\windeployqt.exe" `
             --release `
             --no-translations `
@@ -180,9 +183,95 @@ jobs:
             throw "windeployqt failed with exit code $LASTEXITCODE"
           }
 
-      - name: Audit deployment architecture
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+            -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC" -Recurse -Directory -Filter "Microsoft.VC*.CRT" |
+            Where-Object {
+              $_.FullName -match '\\MSVC\\\d+\.\d+\.\d+\\arm64\\Microsoft\.VC\d+\.CRT$'
+            } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $crt) {
+            throw "Could not find the ARM64 Visual C++ runtime"
+          }
+          foreach ($runtime in @(
+            "msvcp140.dll",
+            "msvcp140_1.dll",
+            "msvcp140_2.dll",
+            "vcruntime140.dll"
+          )) {
+            Copy-Item (Join-Path $crt.FullName $runtime) -Destination $env:DEPLOY_DIR
+          }
+
+          Copy-Item "res\nointro.dat" -Destination $env:DEPLOY_DIR
+          Copy-Item "res\shaders" -Destination $env:DEPLOY_DIR -Recurse
+          New-Item -ItemType Directory -Force -Path "$env:DEPLOY_DIR\licenses" | Out-Null
+          Copy-Item "res\licenses\inih.txt" -Destination "$env:DEPLOY_DIR\licenses"
+          Copy-Item "res\licenses\discord-rpc.txt" -Destination "$env:DEPLOY_DIR\licenses"
+          Copy-Item "res\licenses\rapidjson.txt" -Destination "$env:DEPLOY_DIR\licenses"
+          Copy-Item "README.md" -Destination $env:DEPLOY_DIR
+          New-Item -ItemType File -Force -Path "$env:DEPLOY_DIR\portable.ini" | Out-Null
+
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          foreach ($document in @("CHANGES", "LICENSE")) {
+            $content = (Get-Content -LiteralPath $document -Raw) -replace "`r?`n", "`r`n"
+            [System.IO.File]::WriteAllText(
+              "$env:DEPLOY_DIR\$document.txt",
+              $content,
+              $utf8
+            )
+          }
+
+      - name: Create portable archive
+        id: package
         shell: pwsh
         run: |
+          $versionLine = Select-String `
+            -LiteralPath "$env:BUILD_DIR\CMakeCache.txt" `
+            -Pattern '^VERSION_STRING_CACHE:STRING=(.+)$'
+          if (-not $versionLine) {
+            throw "VERSION_STRING_CACHE is missing from CMakeCache.txt"
+          }
+          $version = $versionLine.Matches[0].Groups[1].Value
+          $cleanVersion = $version -replace '[^-A-Za-z0-9_.]', '-'
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            $shortSha = "${{ github.event.pull_request.head.sha }}".Substring(0, 12)
+            $cleanVersion = "$cleanVersion-pr${{ github.event.pull_request.number }}-$shortSha"
+          }
+          $packageName = "mGBA-$cleanVersion-windows-arm64"
+          $packageDir = Join-Path $env:RUNNER_TEMP $packageName
+          $archive = Join-Path $env:RUNNER_TEMP "$packageName.zip"
+          $checksum = "$archive.sha256"
+
+          Remove-Item -LiteralPath $packageDir -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item "$env:DEPLOY_DIR\*" -Destination $packageDir -Recurse
+          Compress-Archive -LiteralPath $packageDir -DestinationPath $archive
+
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $ascii = [System.Text.ASCIIEncoding]::new()
+          [System.IO.File]::WriteAllText(
+            $checksum,
+            "$hash  $([System.IO.Path]::GetFileName($archive))`n",
+            $ascii
+          )
+
+          "name=$packageName" >> $env:GITHUB_OUTPUT
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+          "checksum=$checksum" >> $env:GITHUB_OUTPUT
+
+      - name: Audit portable archive
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP "mGBA-windows-arm64-audit"
+          Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath "${{ steps.package.outputs.archive }}" -DestinationPath $extract
+          $packageRoot = Join-Path $extract "${{ steps.package.outputs.name }}"
+
           $required = @(
             "mGBA.exe",
             "mgba.dll",
@@ -194,16 +283,42 @@ jobs:
             "Qt6Core.dll",
             "Qt6Gui.dll",
             "Qt6Widgets.dll",
-            "platforms\qwindows.dll"
+            "platforms\qwindows.dll",
+            "msvcp140.dll",
+            "msvcp140_1.dll",
+            "msvcp140_2.dll",
+            "vcruntime140.dll",
+            "nointro.dat",
+            "shaders",
+            "licenses\inih.txt",
+            "licenses\discord-rpc.txt",
+            "licenses\rapidjson.txt",
+            "CHANGES.txt",
+            "LICENSE.txt",
+            "README.md",
+            "portable.ini"
           )
           $missing = $required | Where-Object {
-            -not (Test-Path -LiteralPath (Join-Path $env:DEPLOY_DIR $_))
+            -not (Test-Path -LiteralPath (Join-Path $packageRoot $_))
           }
           if ($missing) {
-            throw "Deployment is missing required files: $($missing -join ', ')"
+            throw "Portable archive is missing required files: $($missing -join ', ')"
           }
 
-          $binaries = Get-ChildItem -LiteralPath $env:DEPLOY_DIR -Recurse -File |
+          $developmentFiles = Get-ChildItem $packageRoot -Recurse -File `
+            -Include *.lib,*.exp,*.pdb,*.ilk
+          if ($developmentFiles) {
+            throw "Portable archive contains development files: $($developmentFiles.Name -join ', ')"
+          }
+
+          foreach ($document in @("CHANGES.txt", "LICENSE.txt")) {
+            $bytes = [System.IO.File]::ReadAllBytes((Join-Path $packageRoot $document))
+            if ([System.Array]::IndexOf($bytes, [byte]13) -lt 0) {
+              throw "$document does not contain CRLF line endings"
+            }
+          }
+
+          $binaries = Get-ChildItem -LiteralPath $packageRoot -Recurse -File |
             Where-Object Extension -In ".exe", ".dll"
           if ($binaries.Count -lt 20) {
             throw "Deployment contains only $($binaries.Count) PE files; expected at least 20"
@@ -234,15 +349,70 @@ jobs:
             }
           }
           if ($invalid) {
-            $invalid | ForEach-Object { Write-Error $_ }
+            $invalid | ForEach-Object { Write-Host $_ }
             throw "Deployment architecture audit failed"
           }
           "Audited $($binaries.Count) native ARM64 PE files"
 
-      - name: Upload deployment
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+            -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -File -Filter "dumpbin.exe" |
+            Where-Object { $_.FullName -match '\\bin\\Hostarm64\\arm64\\dumpbin\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "Could not find the native ARM64 dumpbin executable"
+          }
+
+          $unresolved = foreach ($binary in $binaries) {
+            $dependencies = & $dumpbin.FullName "-dependents" $binary.FullName |
+              ForEach-Object { $_.Trim() } |
+              Where-Object { $_ -match '^[A-Za-z0-9_.-]+\.dll$' }
+            if ($LASTEXITCODE -ne 0) {
+              throw "dumpbin failed for $($binary.FullName)"
+            }
+            foreach ($dependency in $dependencies) {
+              $packaged = Test-Path -LiteralPath (Join-Path $packageRoot $dependency)
+              $system = Test-Path -LiteralPath (
+                Join-Path $env:SystemRoot "System32\$dependency"
+              )
+              $apiSet = $dependency -match '^(api|ext)-ms-win-'
+              $redistributable = $dependency -match `
+                '^(concrt|mfc|msvcp|vcamp|vccorlib|vcomp|vcruntime)\d.*\.dll$'
+              if (
+                -not $apiSet -and
+                -not $packaged -and
+                ($redistributable -or -not $system)
+              ) {
+                "$($binary.FullName): $dependency"
+              }
+            }
+          }
+          if ($unresolved) {
+            $unresolved | ForEach-Object { Write-Host $_ }
+            throw "Portable archive contains unresolved runtime dependencies"
+          }
+
+          $expected = (
+            Get-Content -LiteralPath "${{ steps.package.outputs.checksum }}"
+          ).Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)[0]
+          $actual = (
+            Get-FileHash -LiteralPath "${{ steps.package.outputs.archive }}" -Algorithm SHA256
+          ).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Portable archive checksum mismatch"
+          }
+
+      - name: Upload portable archive
         uses: actions/upload-artifact@v4
         with:
-          name: mGBA-windows-arm64
-          path: ${{ env.DEPLOY_DIR }}
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
           if-no-files-found: error
+          compression-level: 0
           retention-days: 7
