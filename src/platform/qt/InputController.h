@@ -21,9 +21,6 @@
 
 #include <memory>
 
-#include <mgba/core/input.h>
-#include <mgba/gba/interface.h>
-
 #ifdef BUILD_QT_MULTIMEDIA
 #include "VideoDumper.h"
 
@@ -33,6 +30,9 @@
 #include <QVideoSink>
 #endif
 #endif
+
+#include <mgba/core/input.h>
+#include <mgba/gba/interface.h>
 
 struct mRotationSource;
 struct mRumble;

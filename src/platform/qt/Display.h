@@ -5,14 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #pragma once
 
-#include <mgba-util/common.h>
-#include <mgba-util/vfs.h>
-
 #include <memory>
 
 #include <QWidget>
 
 #include "MessagePainter.h"
+
+#include <mgba-util/common.h>
+#include <mgba-util/vfs.h>
 
 struct VideoBackend;
 struct VideoShader;

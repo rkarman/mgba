@@ -5,17 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #pragma once
 
-#include "GBAApp.h"
-#include "Log.h"
-
-#include <mgba/core/log.h>
-
 #include <QFile>
 #include <QLoggingCategory>
 #include <QObject>
 #include <QStringList>
 #include <QTextStream>
+
 #include <memory>
+
+#include "GBAApp.h"
+#include "Log.h"
+
+#include <mgba/core/log.h>
 
 namespace QGBA {
 

@@ -5,9 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #pragma once
 
-#include <mgba/core/core.h>
-#include <mgba-util/socket.h>
-#include <mgba-util/vfs.h>
+#include <algorithm>
+#include <functional>
 
 #include <QHostAddress>
 #include <QRect>
@@ -15,8 +14,9 @@
 #include <QString>
 #include <QVector>
 
-#include <algorithm>
-#include <functional>
+#include <mgba/core/core.h>
+#include <mgba-util/socket.h>
+#include <mgba-util/vfs.h>
 
 struct VDir;
 struct VDirEntry;
