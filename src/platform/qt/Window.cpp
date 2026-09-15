@@ -122,6 +122,7 @@ Window::Window(CoreManager* manager, ConfigController* config, int playerId, QWi
 		m_savedScale = multiplier.toInt();
 		i = m_savedScale;
 	}
+	attachWidget(m_screenWidget);
 #ifdef USE_SQLITE3
 	m_libraryView = new LibraryController(nullptr, ConfigController::configDir() + "/library.sqlite3", m_config);
 	ConfigOption* showLibrary = m_config->addOption("showLibrary");
@@ -2072,6 +2073,9 @@ void Window::attachWidget(QWidget* widget) {
 
 void Window::detachWidget() {
 	m_config->updateOption("showLibrary");
+	if (!m_controller && (!centralWidget() || centralWidget() == m_display.get())) {
+		attachWidget(m_screenWidget);
+	}
 }
 
 void Window::appendMRU(const QString& fname) {
