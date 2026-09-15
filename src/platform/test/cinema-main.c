@@ -34,6 +34,23 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#endif
+
+#ifdef _MSC_VER
+#define access _access
+#define getcwd _getcwd
+#ifndef R_OK
+#define R_OK 4
+#endif
+#ifndef X_OK
+// MSVC _access has no execute test; mode 1 is invalid.
+#define X_OK 0
+#endif
+#endif
+
 #define MAX_TEST 200
 #define MAX_JOBS 128
 #define LOG_THRESHOLD 1000000
@@ -733,7 +750,7 @@ static struct VDir* _makeOutDir(const char* testName) {
 #ifndef _WIN32
 		mkdir(path, 0777);
 #else
-		mkdir(path);
+		_mkdir(path);
 #endif
 
 		if (!pos) {
