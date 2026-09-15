@@ -327,14 +327,7 @@ else()
 endif()
 
 if(BUILD_UPDATER)
-	if(DEFINED CMAKE_CONFIGURATION_TYPES)
-		# Required for e.g. MSVC
-		file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/updater.qrc INPUT ${CMAKE_CURRENT_SOURCE_DIR}/updater.qrc.in)
-	else()
-		# Required for qt_add_resources to manage dependencies properly
-		# TODO: Figure out how to do this with MSVC too
-		configure_file(${CMAKE_CURRENT_SOURCE_DIR}/updater-config.qrc.in ${CMAKE_CURRENT_BINARY_DIR}/updater.qrc)
-	endif()
+	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/updater-config.qrc.in ${CMAKE_CURRENT_BINARY_DIR}/updater.qrc)
 	if(TARGET Qt6::Core)
 		qt_add_resources(UPDATER_RESOURCES ${CMAKE_CURRENT_BINARY_DIR}/updater.qrc)
 	else()
@@ -454,6 +447,9 @@ endif()
 
 add_executable(${BINARY_NAME}-qt WIN32 MACOSX_BUNDLE main.cpp ${PROJECT_SOURCE_DIR}/res/mgba.icns ${SOURCE_FILES} ${PLATFORM_SRC} ${UI_SRC} ${AUDIO_SRC} ${RESOURCES})
 set_target_properties(${BINARY_NAME}-qt PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${PROJECT_SOURCE_DIR}/res/info.plist.in COMPILE_DEFINITIONS "${FEATURE_DEFINES};${FUNCTION_DEFINES};${OS_DEFINES};${QT_DEFINES}" COMPILE_OPTIONS "${FEATURE_FLAGS}")
+if(BUILD_UPDATER)
+	add_dependencies(${BINARY_NAME}-qt updater-stub-copy)
+endif()
 
 if(WIN32)
 	set_target_properties(${BINARY_NAME}-qt PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

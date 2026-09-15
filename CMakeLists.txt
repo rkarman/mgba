@@ -1053,6 +1053,13 @@ if(BUILD_UPDATER)
 		set_target_properties(updater-stub PROPERTIES LINK_FLAGS_RELEASE -s)
 		set_target_properties(updater-stub PROPERTIES LINK_FLAGS_RELWITHDEBINFO -s)
 	endif()
+	add_custom_target(updater-stub-copy
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:updater-stub>
+			${PROJECT_BINARY_DIR}/updater-stub${CMAKE_EXECUTABLE_SUFFIX}
+		BYPRODUCTS ${PROJECT_BINARY_DIR}/updater-stub${CMAKE_EXECUTABLE_SUFFIX}
+		DEPENDS updater-stub
+		VERBATIM)
 endif()
 
 if(ENABLE_SCRIPTING AND BUILD_DOCGEN)
