@@ -14,7 +14,18 @@ CXX_GUARD_START
 
 #include <mgba-util/image.h>
 
+#if defined(_MSC_VER) && defined(restrict)
+#define MGBA_PUSHED_RESTRICT
+#pragma push_macro("restrict")
+#undef restrict
+#endif
+
 #include <png.h>
+
+#ifdef MGBA_PUSHED_RESTRICT
+#pragma pop_macro("restrict")
+#undef MGBA_PUSHED_RESTRICT
+#endif
 
 struct VFile;
 
