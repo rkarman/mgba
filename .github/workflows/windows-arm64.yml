@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - master
+      - feature/woa-arm64
   workflow_dispatch:
 
 permissions:
