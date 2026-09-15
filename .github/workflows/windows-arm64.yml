@@ -1,0 +1,248 @@
+name: Windows ARM64
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-arm64-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+
+    env:
+      BUILD_DIR: ${{ github.workspace }}\build\windows-arm64
+      DEPLOY_DIR: ${{ github.workspace }}\build\windows-arm64-deploy
+      QT_ROOT: ${{ github.workspace }}\.cache\Qt
+      QT_VERSION: 6.11.1
+      QT_ARCH: win64_msvc2022_arm64
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.cache\vcpkg\archives
+      VCPKG_TARGET_TRIPLET: arm64-windows
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Report native toolchain
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object OSArchitecture, Version, BuildNumber
+          [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture
+          python -c "import platform; print(platform.machine())"
+          cmake --version
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+            -property installationPath
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.QT_ROOT }}
+          key: qt-${{ runner.os }}-${{ runner.arch }}-${{ env.QT_VERSION }}-${{ env.QT_ARCH }}
+
+      - name: Install Qt
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check "aqtinstall==3.3.0"
+          $architectures = (
+            python -m aqt list-qt windows_arm64 desktop --arch $env:QT_VERSION
+          ) -split '\s+' | Where-Object { $_ }
+          $architectures
+          if ($architectures -notcontains $env:QT_ARCH) {
+            throw "Qt architecture $env:QT_ARCH is unavailable for Qt $env:QT_VERSION"
+          }
+          python -m aqt install-qt `
+            windows_arm64 `
+            desktop `
+            $env:QT_VERSION `
+            $env:QT_ARCH `
+            --outputdir $env:QT_ROOT
+
+      - name: Verify Qt installation
+        shell: pwsh
+        run: |
+          $qt = Join-Path $env:QT_ROOT "$env:QT_VERSION\msvc2022_arm64"
+          $required = @(
+            "$qt\bin\windeployqt.exe",
+            "$qt\lib\cmake\Qt6\Qt6Config.cmake"
+          )
+          $missing = $required | Where-Object { -not (Test-Path -LiteralPath $_) }
+          if ($missing) {
+            throw "Qt installation is incomplete: $($missing -join ', ')"
+          }
+
+      - name: Identify vcpkg revision
+        id: vcpkg
+        shell: pwsh
+        run: |
+          $revision = git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_TARGET_TRIPLET }}-${{ steps.vcpkg.outputs.revision }}-sdl2-epoxy-libzip-zlib-bzip2
+
+      - name: Install ARM64 dependencies
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
+            "sdl2:$env:VCPKG_TARGET_TRIPLET" `
+            "libepoxy:$env:VCPKG_TARGET_TRIPLET" `
+            "libzip:$env:VCPKG_TARGET_TRIPLET" `
+            "zlib:$env:VCPKG_TARGET_TRIPLET" `
+            "bzip2:$env:VCPKG_TARGET_TRIPLET"
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $qt = Join-Path $env:QT_ROOT "$env:QT_VERSION\msvc2022_arm64"
+          cmake -S . -B $env:BUILD_DIR `
+            -A ARM64 `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET" `
+            "-DCMAKE_PREFIX_PATH=$qt" `
+            -DBUILD_QT=ON `
+            -DBUILD_SDL=ON `
+            -DBUILD_HEADLESS=ON `
+            -DBUILD_CINEMA=ON `
+            -DBUILD_EXAMPLE=OFF `
+            -DUSE_FFMPEG=OFF `
+            -DUSE_LUA=OFF `
+            -DUSE_PNG=ON `
+            -DUSE_SQLITE3=ON `
+            -DUSE_LIBZIP=ON `
+            -DUSE_MINIZIP=OFF
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build $env:BUILD_DIR `
+            --config Release `
+            --target mgba-qt mgba-sdl mgba-headless mgba-cinema `
+            --parallel 4
+
+      - name: Run cinema baselines
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:BUILD_DIR\Release;$env:VCPKG_INSTALLATION_ROOT\installed\$env:VCPKG_TARGET_TRIPLET\bin;$env:PATH"
+          $out = Join-Path $env:BUILD_DIR "cinema-output"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & "$env:BUILD_DIR\test\Release\mgba-cinema.exe" `
+            --base "${{ github.workspace }}\cinema" `
+            --outdir $out `
+            -v `
+            gba.obj.2d-wrap `
+            gb.acid.dmg-acid2
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cinema baselines failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload cinema diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mGBA-windows-arm64-cinema-diagnostics
+          path: ${{ env.BUILD_DIR }}\cinema-output
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stage Qt deployment
+        shell: pwsh
+        run: |
+          $qt = Join-Path $env:QT_ROOT "$env:QT_VERSION\msvc2022_arm64"
+          New-Item -ItemType Directory -Force -Path $env:DEPLOY_DIR | Out-Null
+          Copy-Item "$env:BUILD_DIR\Release\*" -Destination $env:DEPLOY_DIR -Recurse
+          Copy-Item LICENSE -Destination $env:DEPLOY_DIR
+          & "$qt\bin\windeployqt.exe" `
+            --release `
+            --no-translations `
+            --no-system-d3d-compiler `
+            --no-compiler-runtime `
+            "$env:DEPLOY_DIR\mGBA.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "windeployqt failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Audit deployment architecture
+        shell: pwsh
+        run: |
+          $required = @(
+            "mGBA.exe",
+            "mgba.dll",
+            "SDL2.dll",
+            "epoxy-0.dll",
+            "zip.dll",
+            "z.dll",
+            "bz2.dll",
+            "Qt6Core.dll",
+            "Qt6Gui.dll",
+            "Qt6Widgets.dll",
+            "platforms\qwindows.dll"
+          )
+          $missing = $required | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $env:DEPLOY_DIR $_))
+          }
+          if ($missing) {
+            throw "Deployment is missing required files: $($missing -join ', ')"
+          }
+
+          $binaries = Get-ChildItem -LiteralPath $env:DEPLOY_DIR -Recurse -File |
+            Where-Object Extension -In ".exe", ".dll"
+          if ($binaries.Count -lt 20) {
+            throw "Deployment contains only $($binaries.Count) PE files; expected at least 20"
+          }
+
+          $invalid = foreach ($binary in $binaries) {
+            $stream = [System.IO.File]::OpenRead($binary.FullName)
+            $reader = [System.IO.BinaryReader]::new($stream)
+            try {
+              if ($reader.ReadUInt16() -ne 0x5A4D) {
+                "$($binary.FullName): missing MZ header"
+                continue
+              }
+              $stream.Position = 0x3C
+              $peOffset = $reader.ReadInt32()
+              $stream.Position = $peOffset
+              if ($reader.ReadUInt32() -ne 0x00004550) {
+                "$($binary.FullName): missing PE header"
+                continue
+              }
+              $machine = $reader.ReadUInt16()
+              if ($machine -ne 0xAA64) {
+                "$($binary.FullName): machine 0x$($machine.ToString('X4'))"
+              }
+            } finally {
+              $reader.Dispose()
+              $stream.Dispose()
+            }
+          }
+          if ($invalid) {
+            $invalid | ForEach-Object { Write-Error $_ }
+            throw "Deployment architecture audit failed"
+          }
+          "Audited $($binaries.Count) native ARM64 PE files"
+
+      - name: Upload deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: mGBA-windows-arm64
+          path: ${{ env.DEPLOY_DIR }}
+          if-no-files-found: error
+          retention-days: 7
