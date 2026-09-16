@@ -271,7 +271,8 @@ jobs:
             "lgpl-3.0.txt",
             "gpl-3.0.txt",
             "sqlite3.txt",
-            "lzma.txt"
+            "lzma.txt",
+            "msvc-runtime.txt"
           )) {
             Copy-ComplianceFile `
               "res\licenses\$license" `
@@ -394,6 +395,7 @@ jobs:
             "licenses\libpng.txt",
             "licenses\sqlite3.txt",
             "licenses\lzma.txt",
+            "licenses\msvc-runtime.txt",
             "sbom\qtbase-$env:QT_VERSION.spdx",
             "sbom\qtsvg-$env:QT_VERSION.spdx",
             "CHANGES.txt",

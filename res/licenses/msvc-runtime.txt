@@ -1,0 +1,10 @@
+Microsoft Visual C++ runtime notice
+===================================
+
+This package includes Microsoft Visual C++ Runtime Libraries distributed as
+Microsoft Distributable Code with applications built using Visual Studio 2022.
+
+Copyright Microsoft Corporation.
+
+Microsoft Visual Studio license terms:
+https://visualstudio.microsoft.com/license-terms/
