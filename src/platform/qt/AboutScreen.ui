@@ -84,7 +84,8 @@
      </property>
      <property name="text">
       <string>© 2013 – {year} Jeffrey Pfau, licensed under the Mozilla Public License, version 2.0
-Game Boy Advance is a registered trademark of Nintendo Co., Ltd.</string>
+Game Boy Advance is a registered trademark of Nintendo Co., Ltd.
+This application uses Qt 6 under the GNU Lesser General Public License, version 3. See the bundled licenses for details.</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignCenter</set>

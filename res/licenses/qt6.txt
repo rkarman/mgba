@@ -1,0 +1,19 @@
+Qt 6 runtime notice
+===================
+
+This package includes dynamically linked libraries and plugins from Qt 6.11.1:
+Qt Core, Gui, Widgets, Network, OpenGL, OpenGLWidgets, and Svg.
+
+These Qt components are distributed under the GNU Lesser General Public
+License version 3 option offered by The Qt Company. The complete LGPL 3.0 and
+GPL 3.0 license texts are included as lgpl-3.0.txt and gpl-3.0.txt.
+
+The Qt DLLs and plugins are separate files in this portable package and may be
+replaced with interface-compatible builds. mGBA does not modify Qt.
+
+Corresponding Qt source is available from:
+https://download.qt.io/archive/qt/6.11/6.11.1/submodules/
+
+Qt-generated SPDX manifests for the deployed Qt Base and Qt SVG modules are
+included in the package's sbom directory. They record module, file, and bundled
+third-party licensing information for the installed Qt distribution.

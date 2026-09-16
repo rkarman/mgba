@@ -237,10 +237,71 @@ jobs:
 
           Copy-Item "res\nointro.dat" -Destination $env:DEPLOY_DIR
           Copy-Item "res\shaders" -Destination $env:DEPLOY_DIR -Recurse
-          New-Item -ItemType Directory -Force -Path "$env:DEPLOY_DIR\licenses" | Out-Null
-          Copy-Item "res\licenses\inih.txt" -Destination "$env:DEPLOY_DIR\licenses"
-          Copy-Item "res\licenses\discord-rpc.txt" -Destination "$env:DEPLOY_DIR\licenses"
-          Copy-Item "res\licenses\rapidjson.txt" -Destination "$env:DEPLOY_DIR\licenses"
+          $licenseDir = New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path "$env:DEPLOY_DIR\licenses"
+          $sbomDir = New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path "$env:DEPLOY_DIR\sbom"
+
+          function Copy-ComplianceFile {
+            param(
+              [Parameter(Mandatory)]
+              [string] $Source,
+              [Parameter(Mandatory)]
+              [string] $Destination
+            )
+
+            if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+              throw "Required compliance file is missing: $Source"
+            }
+            if ((Get-Item -LiteralPath $Source).Length -eq 0) {
+              throw "Required compliance file is empty: $Source"
+            }
+            Copy-Item -LiteralPath $Source -Destination $Destination
+          }
+
+          foreach ($license in @(
+            "inih.txt",
+            "discord-rpc.txt",
+            "rapidjson.txt",
+            "qt6.txt",
+            "lgpl-3.0.txt",
+            "gpl-3.0.txt",
+            "sqlite3.txt",
+            "lzma.txt"
+          )) {
+            Copy-ComplianceFile `
+              "res\licenses\$license" `
+              (Join-Path $licenseDir.FullName $license)
+          }
+          Copy-ComplianceFile `
+            "src\third-party\libpng\LICENSE" `
+            (Join-Path $licenseDir.FullName "libpng.txt")
+
+          $vcpkgShare = Join-Path `
+            $env:VCPKG_INSTALLATION_ROOT `
+            "installed\$env:VCPKG_TARGET_TRIPLET\share"
+          foreach ($dependency in @(
+            @{ Port = "sdl2"; File = "sdl2.txt" },
+            @{ Port = "libepoxy"; File = "libepoxy.txt" },
+            @{ Port = "libzip"; File = "libzip.txt" },
+            @{ Port = "zlib"; File = "zlib.txt" },
+            @{ Port = "bzip2"; File = "bzip2.txt" }
+          )) {
+            Copy-ComplianceFile `
+              (Join-Path $vcpkgShare "$($dependency.Port)\copyright") `
+              (Join-Path $licenseDir.FullName $dependency.File)
+          }
+
+          foreach ($module in @("qtbase", "qtsvg")) {
+            $sbom = "$module-$env:QT_VERSION.spdx"
+            Copy-ComplianceFile `
+              (Join-Path $qt "sbom\$sbom") `
+              (Join-Path $sbomDir.FullName $sbom)
+          }
           Copy-Item "README.md" -Destination $env:DEPLOY_DIR
           New-Item -ItemType File -Force -Path "$env:DEPLOY_DIR\portable.ini" | Out-Null
 
@@ -322,6 +383,19 @@ jobs:
             "licenses\inih.txt",
             "licenses\discord-rpc.txt",
             "licenses\rapidjson.txt",
+            "licenses\qt6.txt",
+            "licenses\lgpl-3.0.txt",
+            "licenses\gpl-3.0.txt",
+            "licenses\sdl2.txt",
+            "licenses\libepoxy.txt",
+            "licenses\libzip.txt",
+            "licenses\zlib.txt",
+            "licenses\bzip2.txt",
+            "licenses\libpng.txt",
+            "licenses\sqlite3.txt",
+            "licenses\lzma.txt",
+            "sbom\qtbase-$env:QT_VERSION.spdx",
+            "sbom\qtsvg-$env:QT_VERSION.spdx",
             "CHANGES.txt",
             "LICENSE.txt",
             "README.md",
@@ -332,6 +406,50 @@ jobs:
           }
           if ($missing) {
             throw "Portable archive is missing required files: $($missing -join ', ')"
+          }
+
+          $complianceFiles = Get-ChildItem `
+            "$packageRoot\licenses", "$packageRoot\sbom" `
+            -Recurse `
+            -File
+          $emptyComplianceFiles = $complianceFiles | Where-Object Length -eq 0
+          if ($emptyComplianceFiles) {
+            throw "Portable archive contains empty compliance files: $(
+              $emptyComplianceFiles.Name -join ', '
+            )"
+          }
+
+          $documentedQtModules = @(
+            "Core",
+            "Gui",
+            "Widgets",
+            "Network",
+            "OpenGL",
+            "OpenGLWidgets",
+            "Svg"
+          )
+          $deployedQtModules = Get-ChildItem `
+            -LiteralPath $packageRoot `
+            -Recurse `
+            -File `
+            -Filter "Qt6*.dll" |
+            ForEach-Object { $_.BaseName -replace '^Qt6', '' } |
+            Sort-Object -Unique
+          $undocumentedQtModules = $deployedQtModules | Where-Object {
+            $_ -notin $documentedQtModules
+          }
+          if ($undocumentedQtModules) {
+            throw "Deployed Qt modules are missing from licenses\qt6.txt: $(
+              $undocumentedQtModules -join ', '
+            )"
+          }
+          $absentQtModules = $documentedQtModules | Where-Object {
+            $_ -notin $deployedQtModules
+          }
+          if ($absentQtModules) {
+            throw "licenses\qt6.txt lists Qt modules that were not deployed: $(
+              $absentQtModules -join ', '
+            )"
           }
 
           $developmentFiles = Get-ChildItem $packageRoot -Recurse -File `

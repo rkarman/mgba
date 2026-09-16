@@ -1,0 +1,13 @@
+SQLite public-domain notice
+===========================
+
+The SQLite source included with mGBA is dedicated to the public domain.
+
+The SQLite authors provide this blessing in place of a legal notice:
+
+May you do good and not evil.
+May you find forgiveness for yourself and forgive others.
+May you share freely, never taking more than you give.
+
+Source and additional information:
+https://www.sqlite.org/copyright.html

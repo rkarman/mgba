@@ -1,0 +1,12 @@
+LZMA SDK public-domain notice
+=============================
+
+The LZMA SDK source included with mGBA was written by Igor Pavlov and is in
+the public domain.
+
+The source files carry the notice:
+
+Igor Pavlov : Public domain
+
+Project information:
+https://www.7-zip.org/sdk.html
