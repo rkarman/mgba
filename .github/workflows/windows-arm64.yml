@@ -125,6 +125,7 @@ jobs:
             -DBUILD_SDL=ON `
             -DBUILD_HEADLESS=ON `
             -DBUILD_CINEMA=ON `
+            -DBUILD_PERF=ON `
             -DBUILD_EXAMPLE=OFF `
             -DUSE_FFMPEG=OFF `
             -DUSE_LUA=OFF `
@@ -138,7 +139,7 @@ jobs:
         run: |
           cmake --build $env:BUILD_DIR `
             --config Release `
-            --target mgba-qt mgba-sdl mgba-headless mgba-cinema `
+            --target mgba-qt mgba-sdl mgba-headless mgba-cinema mgba-perf `
             --parallel 4
 
       - name: Run cinema baselines
@@ -157,6 +158,32 @@ jobs:
             throw "Cinema baselines failed with exit code $LASTEXITCODE"
           }
 
+      - name: Run performance smoke tests
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:BUILD_DIR\Release;$env:VCPKG_INSTALLATION_ROOT\installed\$env:VCPKG_TARGET_TRIPLET\bin;$env:PATH"
+          $perf = "$env:BUILD_DIR\Release\mgba-perf.exe"
+
+          $gba = & $perf `
+            -F 60 `
+            -N `
+            -P `
+            "${{ github.workspace }}\cinema\gba\obj\2d-wrap\test.gba"
+          $gba | Write-Host
+          if ($LASTEXITCODE -ne 0 -or -not ($gba -match ',60,\d+,none$')) {
+            throw "No-video performance smoke test failed"
+          }
+
+          $gb = & $perf `
+            -F 60 `
+            -P `
+            "${{ github.workspace }}\cinema\gb\acid\dmg-acid2\test.gb"
+          $gb | Write-Host
+          if ($LASTEXITCODE -ne 0 -or -not ($gb -match ',60,\d+,software$')) {
+            throw "Software-rendered performance smoke test failed"
+          }
+
       - name: Upload cinema diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -172,6 +199,7 @@ jobs:
           $qt = Join-Path $env:QT_ROOT "$env:QT_VERSION\msvc2022_arm64"
           New-Item -ItemType Directory -Force -Path $env:DEPLOY_DIR | Out-Null
           Copy-Item "$env:BUILD_DIR\Release\*" -Destination $env:DEPLOY_DIR -Recurse
+          Remove-Item "$env:DEPLOY_DIR\mgba-perf.exe"
           Get-ChildItem $env:DEPLOY_DIR -Recurse -File -Include *.lib,*.exp,*.pdb,*.ilk |
             Remove-Item -Force
           & "$qt\bin\windeployqt.exe" `
@@ -310,6 +338,12 @@ jobs:
             -Include *.lib,*.exp,*.pdb,*.ilk
           if ($developmentFiles) {
             throw "Portable archive contains development files: $($developmentFiles.Name -join ', ')"
+          }
+
+          $testTools = Get-ChildItem $packageRoot -Recurse -File |
+            Where-Object Name -In "mgba-cinema.exe", "mgba-perf.exe"
+          if ($testTools) {
+            throw "Portable archive contains test tools: $($testTools.Name -join ', ')"
           }
 
           foreach ($document in @("CHANGES.txt", "LICENSE.txt")) {

@@ -39,7 +39,11 @@ size_t romBufferSize;
 #include <fcntl.h>
 #include <signal.h>
 #include <inttypes.h>
+#ifdef _MSC_VER
+#include <time.h>
+#else
 #include <sys/time.h>
+#endif
 
 #define PERF_OPTIONS "DF:L:NPS:T"
 #define PERF_USAGE \
@@ -68,6 +72,7 @@ TimeType __nx_time_type = TimeType_LocalSystemClock;
 
 static void _mPerfRunloop(struct mCore* context, int* frames, bool quiet);
 static void _mPerfShutdown(int signal);
+static uint64_t _mPerfTime(void);
 static bool _parsePerfOpts(struct mSubParser* parser, int option, const char* arg);
 static void _log(struct mLogger*, int, enum mLogLevel, const char*, va_list);
 static bool _mPerfRunCore(const char* fname, const struct mArguments*, const struct PerfOpts*);
@@ -222,12 +227,9 @@ bool _mPerfRunCore(const char* fname, const struct mArguments* args, const struc
 	if (!frames) {
 		frames = perfOpts->duration * 60;
 	}
-	struct timeval tv;
-	gettimeofday(&tv, 0);
-	uint64_t start = 1000000LL * tv.tv_sec + tv.tv_usec;
+	uint64_t start = _mPerfTime();
 	_mPerfRunloop(core, &frames, perfOpts->csv);
-	gettimeofday(&tv, 0);
-	uint64_t end = 1000000LL * tv.tv_sec + tv.tv_usec;
+	uint64_t end = _mPerfTime();
 	uint64_t duration = end - start;
 
 	mCoreConfigFreeOpts(&opts);
@@ -261,8 +263,7 @@ bool _mPerfRunCore(const char* fname, const struct mArguments* args, const struc
 }
 
 static void _mPerfRunloop(struct mCore* core, int* frames, bool quiet) {
-	struct timeval lastEcho;
-	gettimeofday(&lastEcho, 0);
+	uint64_t lastEcho = _mPerfTime();
 	int duration = *frames;
 	*frames = 0;
 	int lastFrames = 0;
@@ -271,20 +272,18 @@ static void _mPerfRunloop(struct mCore* core, int* frames, bool quiet) {
 		++*frames;
 		++lastFrames;
 		if (!quiet) {
-			struct timeval currentTime;
-			long timeDiff;
-			gettimeofday(&currentTime, 0);
-			timeDiff = currentTime.tv_sec - lastEcho.tv_sec;
-			timeDiff *= 1000;
-			timeDiff += (currentTime.tv_usec - lastEcho.tv_usec) / 1000;
-			if (timeDiff >= 1000) {
-				printf("\033[2K\rCurrent FPS: %g (%gx)", lastFrames / (timeDiff / 1000.0f), lastFrames / (float) (60 * (timeDiff / 1000.0f)));
-				fflush(stdout);
+			uint64_t currentTime = _mPerfTime();
+			if (currentTime > lastEcho) {
+				uint64_t timeDiff = (currentTime - lastEcho) / 1000;
+				if (timeDiff >= 1000) {
+					printf("\033[2K\rCurrent FPS: %g (%gx)", lastFrames / (timeDiff / 1000.0f), lastFrames / (float) (60 * (timeDiff / 1000.0f)));
+					fflush(stdout);
 #ifdef __SWITCH__
-				consoleUpdate(NULL);
+					consoleUpdate(NULL);
 #endif
-				lastEcho = currentTime;
-				lastFrames = 0;
+					lastEcho = currentTime;
+					lastFrames = 0;
+				}
 			}
 		}
 		if (duration > 0 && *frames == duration) {
@@ -294,6 +293,24 @@ static void _mPerfRunloop(struct mCore* core, int* frames, bool quiet) {
 	if (!quiet) {
 		printf("\033[2K\r");
 	}
+}
+
+static uint64_t _mPerfTime(void) {
+#ifdef _MSC_VER
+	struct timespec ts;
+	if (timespec_get(&ts, TIME_UTC) != TIME_UTC) {
+		fputs("Could not read system clock\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	return ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
+#else
+	struct timeval tv;
+	if (gettimeofday(&tv, 0)) {
+		fputs("Could not read system clock\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	return tv.tv_sec * 1000000LL + tv.tv_usec;
+#endif
 }
 
 static bool _mPerfRunServer(const struct mArguments* args, const struct PerfOpts* perfOpts) {
